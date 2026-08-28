@@ -1,16 +1,32 @@
-# Ilham Romadhon
+<div align="center">
 
-I am based in Malang, East Java, Indonesia, and study at BINUS University. Here I publish selected web projects and the work behind them.
+<h3><code>ibam@github ~ $ whoami</code></h3>
 
-## Featured Work
+<table>
+<tr>
+<td valign="top"><img src="./assets/ibam-ascii.svg" width="370" alt="Ilham Romadhon rendered as an animated ASCII portrait" /></td>
+<td valign="top"><img src="./assets/ibam-wordmark.svg" width="490" alt="Animated IBAM ASCII wordmark and developer profile" /></td>
+</tr>
+</table>
 
-### RoyalVilla
+<br>
+<br>
 
-RoyalVilla is a Laravel and React showcase centered on a villa marketplace experience. It documents property discovery, seller promotion, payment states, and moderated publication.
+<h3><code>ibam@github ~ $ ./contributions.sh</code></h3>
 
-[Explore RoyalVilla](https://github.com/ibamzjr/RoyalVilla)
+<img src="./assets/contrib-heatmap.svg" width="860" alt="ibamzjr GitHub contribution graph, refreshed daily" />
 
-## Links
+<br>
+<br>
 
-- [Portfolio](https://ibamcr.framer.website/)
-- [LinkedIn](https://www.linkedin.com/in/ilhamromadhonjr)
+<h3><code>ibam@github ~ $ ./links.sh</code></h3>
+
+<p><b>Web Developer | Laravel &amp; React | Malang, Indonesia</b></p>
+
+[![Portfolio](https://img.shields.io/badge/Portfolio-ibamcr.framer.website-0D1117?style=for-the-badge&logo=framer&logoColor=white)](https://ibamcr.framer.website/)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-ilhamromadhonjr-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/ilhamromadhonjr/)
+[![Instagram](https://img.shields.io/badge/Instagram-%40ibamcr-E4405F?style=for-the-badge&logo=instagram&logoColor=white)](https://www.instagram.com/ibamcr)
+
+<br>
+
+</div>

@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+
+# The source portrait stays local; only generated SVG artwork is published.
+*.jpg
+*.jpeg
+*.png

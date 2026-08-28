@@ -1,0 +1,51 @@
+name: Refresh profile contributions
+
+on:
+  schedule:
+    - cron: "23 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: profile-contribution-art
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Refresh contribution graph
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out profile repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+
+      - name: Fetch public contribution data
+        run: python scripts/fetch_contributions.py --username ibamzjr
+
+      - name: Render contribution artwork
+        run: python scripts/render_heatmap_svg.py
+
+      - name: Validate generators
+        run: python -m compileall -q scripts
+
+      - name: Publish refreshed artwork
+        shell: bash
+        run: |
+          if git diff --quiet -- data/contributions.json assets/contrib-heatmap.svg; then
+            echo "Contribution artwork is already current."
+            exit 0
+          fi
+
+          git config user.name "Ilham Romadhon"
+          git config user.email "145681599+ibamzjr@users.noreply.github.com"
+          git add data/contributions.json assets/contrib-heatmap.svg
+          git commit -m "chore(profile): refresh contribution graph [skip ci]"
+          git push

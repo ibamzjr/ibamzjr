@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch the public GitHub contribution calendar without an API token."""
+"""Fetch GitHub's public contribution calendar without an API token."""
 
 from __future__ import annotations
 
@@ -10,18 +10,25 @@ import tempfile
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 
 
 COUNT_PATTERN = re.compile(r"([\d,]+)\s+contributions?", re.IGNORECASE)
+TOTAL_PATTERN = re.compile(
+    r"([\d,]+)\s+contributions?\s+in\s+the\s+last\s+year",
+    re.IGNORECASE,
+)
+CELL_ID_PATTERN = re.compile(r"contribution-day-component-(\d+)-(\d+)$")
 
 
-@dataclass
+@dataclass(frozen=True)
 class RawCell:
     date_text: str
     level: int
+    week: int
+    weekday: int
     element_id: str
     count_text: str | None
 
@@ -31,24 +38,50 @@ class ContributionCalendarParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.cells: list[RawCell] = []
         self.tooltips: dict[str, str] = {}
+        self.months: list[tuple[str, int]] = []
         self._tooltip_for: str | None = None
         self._tooltip_parts: list[str] = []
+        self._month_span: int | None = None
+        self._month_text_parts: list[str] | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = {key: value or "" for key, value in attrs}
+        classes = set(values.get("class", "").split())
         if tag == "td" and values.get("data-date"):
+            match = CELL_ID_PATTERN.fullmatch(values.get("id", ""))
+            if match is None:
+                raise ValueError("Contribution cell has an unexpected id")
+            weekday = int(match.group(1))
+            week_from_id = int(match.group(2))
             try:
-                level = int(values.get("data-level", "0"))
-            except ValueError as error:
-                raise ValueError("Contribution cell has an invalid data-level") from error
+                week = int(values["data-ix"])
+                level = int(values["data-level"])
+            except (KeyError, ValueError) as error:
+                raise ValueError("Contribution cell metadata is invalid") from error
+            if week != week_from_id:
+                raise ValueError("Contribution cell id and data-ix disagree")
             self.cells.append(
                 RawCell(
                     date_text=values["data-date"],
                     level=level,
-                    element_id=values.get("id", ""),
+                    week=week,
+                    weekday=weekday,
+                    element_id=values["id"],
                     count_text=values.get("data-count") or None,
                 )
             )
+        elif (
+            tag == "td"
+            and "ContributionCalendar-label" in classes
+            and values.get("colspan")
+        ):
+            self._month_span = int(values["colspan"])
+        elif (
+            tag == "span"
+            and self._month_span is not None
+            and values.get("aria-hidden") == "true"
+        ):
+            self._month_text_parts = []
         elif tag == "tool-tip" and values.get("for"):
             self._tooltip_for = values["for"]
             self._tooltip_parts = []
@@ -56,10 +89,21 @@ class ContributionCalendarParser(HTMLParser):
     def handle_data(self, data: str) -> None:
         if self._tooltip_for is not None:
             self._tooltip_parts.append(data)
+        if self._month_text_parts is not None:
+            self._month_text_parts.append(data)
 
     def handle_endtag(self, tag: str) -> None:
-        if tag == "tool-tip" and self._tooltip_for is not None:
-            self.tooltips[self._tooltip_for] = " ".join(self._tooltip_parts).strip()
+        if tag == "span" and self._month_text_parts is not None:
+            label = " ".join(self._month_text_parts).strip()
+            if label:
+                self.months.append((label, int(self._month_span)))
+            self._month_text_parts = None
+        elif tag == "td" and self._month_span is not None:
+            self._month_span = None
+        elif tag == "tool-tip" and self._tooltip_for is not None:
+            self.tooltips[self._tooltip_for] = " ".join(
+                self._tooltip_parts
+            ).strip()
             self._tooltip_for = None
             self._tooltip_parts = []
 
@@ -72,6 +116,11 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("data/contributions.json"),
     )
+    parser.add_argument(
+        "--input-html",
+        type=Path,
+        help="Optional saved GitHub contribution fragment for offline validation",
+    )
     return parser.parse_args()
 
 
@@ -81,7 +130,7 @@ def download_calendar(username: str) -> str:
         url,
         headers={
             "Accept": "text/html",
-            "User-Agent": f"{username}-profile-readme/1.0",
+            "User-Agent": f"{username}-profile-calendar/2.0",
         },
     )
     try:
@@ -99,96 +148,82 @@ def parse_count(cell: RawCell, tooltip: str) -> int:
             return int(cell.count_text.replace(",", ""))
         except ValueError:
             pass
-
     if "no contributions" in tooltip.lower():
         return 0
     match = COUNT_PATTERN.search(tooltip)
     if match:
         return int(match.group(1).replace(",", ""))
-    if cell.level == 0:
-        return 0
     raise RuntimeError(f"Could not determine contribution count for {cell.date_text}")
-
-
-def calculate_streaks(days: list[dict[str, object]]) -> tuple[int, int]:
-    active_dates = {
-        date.fromisoformat(str(day["date"]))
-        for day in days
-        if int(day["count"]) > 0
-    }
-    longest = 0
-    running = 0
-    previous: date | None = None
-    for active_date in sorted(active_dates):
-        if previous is not None and active_date == previous + timedelta(days=1):
-            running += 1
-        else:
-            running = 1
-        longest = max(longest, running)
-        previous = active_date
-
-    today = datetime.now(timezone.utc).date()
-    cursor = min(today, max(date.fromisoformat(str(day["date"])) for day in days))
-    if cursor not in active_dates:
-        cursor -= timedelta(days=1)
-    current = 0
-    while cursor in active_dates:
-        current += 1
-        cursor -= timedelta(days=1)
-    return current, longest
 
 
 def build_payload(username: str, source_html: str) -> dict[str, object]:
     parser = ContributionCalendarParser()
     parser.feed(source_html)
-    if len(parser.cells) < 350:
+    if not 350 <= len(parser.cells) <= 371:
         raise RuntimeError(
-            f"Expected at least 350 contribution cells, received {len(parser.cells)}"
+            f"Expected 350-371 dated contribution cells, received {len(parser.cells)}"
         )
+    if len(parser.tooltips) != len(parser.cells):
+        raise RuntimeError("Every contribution cell must have one official tooltip")
+    if len(parser.months) != 13 or sum(span for _, span in parser.months) != 53:
+        raise RuntimeError("Official month headers must span exactly 53 weeks")
 
-    by_date: dict[date, dict[str, object]] = {}
+    days: list[dict[str, object]] = []
     for cell in parser.cells:
         cell_date = date.fromisoformat(cell.date_text)
-        tooltip = parser.tooltips.get(cell.element_id, "")
-        by_date[cell_date] = {
-            "date": cell.date_text,
-            "count": parse_count(cell, tooltip),
-            "level": max(0, min(4, cell.level)),
-        }
+        expected_weekday = (cell_date.weekday() + 1) % 7
+        if cell.weekday != expected_weekday:
+            raise RuntimeError(f"Official weekday mismatch for {cell.date_text}")
+        tooltip = parser.tooltips[cell.element_id]
+        days.append(
+            {
+                "date": cell.date_text,
+                "count": parse_count(cell, tooltip),
+                "level": cell.level,
+                "week": cell.week,
+                "weekday": cell.weekday,
+                "tooltip": tooltip,
+            }
+        )
 
-    ordered_dates = sorted(by_date)
-    latest_date = ordered_dates[-1]
-    age = datetime.now(timezone.utc).date() - latest_date
-    if age.days > 8:
-        raise RuntimeError(f"Contribution data is stale; latest date is {latest_date}")
+    days.sort(key=lambda day: str(day["date"]))
+    dates = [date.fromisoformat(str(day["date"])) for day in days]
+    if any((right - left).days != 1 for left, right in zip(dates, dates[1:])):
+        raise RuntimeError("Contribution dates are not consecutive")
+    if min(int(day["week"]) for day in days) != 0 or max(
+        int(day["week"]) for day in days
+    ) != 52:
+        raise RuntimeError("Official contribution cells must use weeks 0 through 52")
+    if any(int(day["level"]) not in range(5) for day in days):
+        raise RuntimeError("Official contribution levels must be between 0 and 4")
 
-    grid_start = ordered_dates[0] - timedelta(
-        days=(ordered_dates[0].weekday() + 1) % 7
-    )
-    days: list[dict[str, object]] = []
-    for day_date in ordered_dates:
-        item = by_date[day_date]
-        item["week"] = (day_date - grid_start).days // 7
-        item["weekday"] = (day_date.weekday() + 1) % 7
-        days.append(item)
+    total_match = TOTAL_PATTERN.search(source_html)
+    if total_match is None:
+        raise RuntimeError("Official contribution total was not found")
+    official_total = int(total_match.group(1).replace(",", ""))
+    calculated_total = sum(int(day["count"]) for day in days)
+    if official_total != calculated_total:
+        raise RuntimeError(
+            f"Official total {official_total} does not match tooltip sum {calculated_total}"
+        )
 
-    current_streak, longest_streak = calculate_streaks(days)
-    best_day = max(days, key=lambda day: int(day["count"]))
-    stats = {
-        "total": sum(int(day["count"]) for day in days),
-        "active_days": sum(1 for day in days if int(day["count"]) > 0),
-        "current_streak": current_streak,
-        "longest_streak": longest_streak,
-        "best_day": best_day["date"],
-        "best_day_count": int(best_day["count"]),
-    }
+    latest_age = datetime.now(timezone.utc).date() - dates[-1]
+    if latest_age.days > 8:
+        raise RuntimeError(f"Contribution data is stale; latest date is {dates[-1]}")
+
+    start_week = 0
+    months: list[dict[str, object]] = []
+    for label, span in parser.months:
+        months.append({"label": label, "start_week": start_week, "span": span})
+        start_week += span
+
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "username": username,
-        "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "source": f"https://github.com/users/{username}/contributions",
         "range": {"from": days[0]["date"], "to": days[-1]["date"]},
-        "stats": stats,
+        "total_contributions": official_total,
+        "months": months,
         "days": days,
     }
 
@@ -210,12 +245,16 @@ def write_json_atomic(output: Path, payload: dict[str, object]) -> None:
 
 def main() -> None:
     args = parse_args()
-    payload = build_payload(args.username, download_calendar(args.username))
+    source_html = (
+        args.input_html.read_text(encoding="utf-8")
+        if args.input_html is not None
+        else download_calendar(args.username)
+    )
+    payload = build_payload(args.username, source_html)
     write_json_atomic(args.output, payload)
-    stats = payload["stats"]
     print(
-        f"Wrote {args.output}: {stats['total']} contributions, "
-        f"{stats['active_days']} active days"
+        f"Wrote {args.output}: {len(payload['days'])} official cells, "
+        f"{payload['total_contributions']} contributions"
     )
 
 

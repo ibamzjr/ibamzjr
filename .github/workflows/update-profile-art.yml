@@ -2,7 +2,7 @@ name: Refresh profile contributions
 
 on:
   schedule:
-    - cron: "23 0 * * *"
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Check out profile repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
@@ -39,7 +41,13 @@ jobs:
       - name: Publish refreshed artwork
         shell: bash
         run: |
-          if git diff --quiet -- data/contributions.json assets/contrib-heatmap.svg; then
+          git fetch origin profile-assets
+          git worktree add --detach ../profile-assets FETCH_HEAD
+          cp data/contributions.json ../profile-assets/data/contributions.json
+          cp assets/contrib-heatmap.svg ../profile-assets/assets/contrib-heatmap.svg
+          cd ../profile-assets
+
+          if [[ -z "$(git status --short -- data/contributions.json assets/contrib-heatmap.svg)" ]]; then
             echo "Contribution artwork is already current."
             exit 0
           fi
@@ -48,4 +56,4 @@ jobs:
           git config user.email "145681599+ibamzjr@users.noreply.github.com"
           git add data/contributions.json assets/contrib-heatmap.svg
           git commit -m "chore(profile): refresh contribution graph [skip ci]"
-          git push
+          git push origin HEAD:profile-assets

@@ -122,8 +122,8 @@ def render_svg(payload: dict[str, object], static: bool) -> str:
     swatch_x = legend_x + 28
     for level in range(5):
         legend.append(
-            f'<rect class="level-{level}" x="{swatch_x}" y="140" '
-            f'width="10" height="10" rx="2" />'
+            f'<rect class="legend-cell level-{level}" x="{swatch_x}" y="140" '
+            f'width="10" height="10" rx="3" />'
         )
         swatch_x += 14
     legend.append(f'<text class="axis" x="{swatch_x + 2}" y="150">More</text>')
@@ -147,9 +147,14 @@ def render_svg(payload: dict[str, object], static: bool) -> str:
       transform-box: fill-box;
       transform-origin: center;
       animation: contribution-enter 0.40s cubic-bezier(.2,.8,.2,1) both;
-      stroke: #FFFFFF;
-      stroke-opacity: 0.04;
-      stroke-width: 0.5;
+      stroke: #010409;
+      stroke-opacity: 0.05;
+      stroke-width: 0.8;
+    }}
+    .legend-cell {{
+      stroke: #010409;
+      stroke-opacity: 0.05;
+      stroke-width: 0.8;
     }}
 {dark_rules}
     @keyframes contribution-enter {{
@@ -159,6 +164,7 @@ def render_svg(payload: dict[str, object], static: bool) -> str:
     @media (prefers-color-scheme: light) {{
       .axis {{ fill: #57606A; }}
       .summary {{ fill: #1F2328; }}
+      .day, .legend-cell {{ stroke: #1F2328; stroke-opacity: 0.15; }}
 {light_rules}
     }}
     @media (prefers-reduced-motion: reduce) {{

@@ -43,8 +43,11 @@ jobs:
         run: |
           git fetch origin profile-assets
           git worktree add --detach ../profile-assets FETCH_HEAD
-          cp data/contributions.json ../profile-assets/data/contributions.json
-          cp assets/contrib-heatmap.svg ../profile-assets/assets/contrib-heatmap.svg
+          python scripts/stage_contribution_update.py \
+            data/contributions.json \
+            assets/contrib-heatmap.svg \
+            ../profile-assets/data/contributions.json \
+            ../profile-assets/assets/contrib-heatmap.svg
           cd ../profile-assets
 
           if [[ -z "$(git status --short -- data/contributions.json assets/contrib-heatmap.svg)" ]]; then

@@ -42,6 +42,7 @@ class ContributionCalendarParser(HTMLParser):
         self._tooltip_for: str | None = None
         self._tooltip_parts: list[str] = []
         self._month_span: int | None = None
+        self._month_recorded: bool | None = None
         self._month_text_parts: list[str] | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -76,6 +77,7 @@ class ContributionCalendarParser(HTMLParser):
             and values.get("colspan")
         ):
             self._month_span = int(values["colspan"])
+            self._month_recorded = False
         elif (
             tag == "span"
             and self._month_span is not None
@@ -97,9 +99,13 @@ class ContributionCalendarParser(HTMLParser):
             label = " ".join(self._month_text_parts).strip()
             if label:
                 self.months.append((label, int(self._month_span)))
+                self._month_recorded = True
             self._month_text_parts = None
         elif tag == "td" and self._month_span is not None:
+            if not self._month_recorded:
+                self.months.append(("", self._month_span))
             self._month_span = None
+            self._month_recorded = None
         elif tag == "tool-tip" and self._tooltip_for is not None:
             self.tooltips[self._tooltip_for] = " ".join(
                 self._tooltip_parts
@@ -125,12 +131,16 @@ def parse_args() -> argparse.Namespace:
 
 
 def download_calendar(username: str) -> str:
-    url = f"https://github.com/users/{username}/contributions"
+    canonical_url = f"https://github.com/users/{username}/contributions"
+    cache_key = int(datetime.now(timezone.utc).timestamp())
+    url = f"{canonical_url}?cachebust={cache_key}"
     request = urllib.request.Request(
         url,
         headers={
             "Accept": "text/html",
-            "User-Agent": f"{username}-profile-calendar/2.0",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "User-Agent": f"{username}-profile-calendar/3.0",
         },
     )
     try:
@@ -139,7 +149,7 @@ def download_calendar(username: str) -> str:
                 raise RuntimeError(f"GitHub returned HTTP {response.status}")
             return response.read().decode("utf-8")
     except urllib.error.URLError as error:
-        raise RuntimeError(f"Unable to fetch {url}: {error}") from error
+        raise RuntimeError(f"Unable to fetch {canonical_url}: {error}") from error
 
 
 def parse_count(cell: RawCell, tooltip: str) -> int:
@@ -165,7 +175,16 @@ def build_payload(username: str, source_html: str) -> dict[str, object]:
         )
     if len(parser.tooltips) != len(parser.cells):
         raise RuntimeError("Every contribution cell must have one official tooltip")
-    if len(parser.months) != 13 or sum(span for _, span in parser.months) != 53:
+    month_headers = list(parser.months)
+    covered_weeks = sum(span for _, span in month_headers)
+    if len(month_headers) == 12 and covered_weeks < 53:
+        # GitHub omits the label cell for a leading partial month. Keep that
+        # week in the layout so every official data-ix column stays aligned.
+        missing_weeks = 53 - covered_weeks
+        if missing_weeks not in range(1, 6):
+            raise RuntimeError("Official month headers have an invalid leading gap")
+        month_headers.insert(0, ("", missing_weeks))
+    if len(month_headers) != 13 or sum(span for _, span in month_headers) != 53:
         raise RuntimeError("Official month headers must span exactly 53 weeks")
 
     days: list[dict[str, object]] = []
@@ -213,7 +232,7 @@ def build_payload(username: str, source_html: str) -> dict[str, object]:
 
     start_week = 0
     months: list[dict[str, object]] = []
-    for label, span in parser.months:
+    for label, span in month_headers:
         months.append({"label": label, "start_week": start_week, "span": span})
         start_week += span
 
